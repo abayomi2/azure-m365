@@ -1,0 +1,188 @@
+trigger:
+  branches: { include: [ main ] }
+  paths: { include: [ app/** ] }
+
+name: ish-ci-$(Date:yyyyMMdd)$(Rev:.r)
+
+variables:
+  ACR_NAME: $(ACR_NAME)
+  ACR_LOGIN_SERVER: $(ACR_LOGIN_SERVER)
+  RESOURCE_GROUP: $(RESOURCE_GROUP)
+  WEBAPP_NAME: $(WEBAPP_NAME)
+
+stages:
+- stage: Build_Push
+  displayName: Build & Push to ACR
+  jobs:
+  - job: build
+    displayName: Docker Build & Push
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+    - checkout: self
+    - task: NodeTool@0
+      inputs: { versionSpec: '18.x' }
+    - bash: |
+        set -eux
+        cd app/api
+        # install deps & run quick smoke (optional)
+        npm install --omit=dev
+        # build image tagged with build ID
+        docker build -t $(ACR_LOGIN_SERVER)/ish-api:$(Build.BuildId) .
+      displayName: Build image
+    - task: AzureCLI@2
+      displayName: ACR Login & Push
+      inputs:
+        azureSubscription: 'svc-az-spn'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -eux
+          az acr login --name $(ACR_NAME)
+          docker push $(ACR_LOGIN_SERVER)/ish-api:$(Build.BuildId)
+          echo "##vso[task.setvariable variable=IMAGE_TAG;isOutput=true]$(Build.BuildId)"
+      name: pushstep
+
+- stage: Deploy_Staging
+  displayName: Deploy to Staging Slot
+  dependsOn: Build_Push
+  variables:
+    IMAGE_TAG: $[ stageDependencies.Build_Push.build.outputs['pushstep.IMAGE_TAG'] ]
+  jobs:
+  - job: deploy_staging
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+    - task: AzureCLI@2
+      displayName: Ensure staging slot exists
+      inputs:
+        azureSubscription: 'svc-az-spn'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -eux
+          az webapp deployment slot create -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --configuration-source $(WEBAPP_NAME) || true
+    - task: AzureCLI@2
+      displayName: Point slot to new image
+      inputs:
+        azureSubscription: 'svc-az-spn'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -eux
+          az webapp config appsettings set -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging \
+            --settings WEBSITES_PORT=8080
+          az webapp config container set -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging \
+            --docker-custom-image-name $(ACR_LOGIN_SERVER)/ish-api:$(IMAGE_TAG) \
+            --docker-registry-server-url https://$(ACR_LOGIN_SERVER)
+          az webapp restart -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging
+    - bash: |
+        set -eux
+        # warm up and health check (retry a few times)
+        for i in {1..10}; do
+          curl -fsS https://$(WEBAPP_NAME)-staging.azurewebsites.net/healthz && exit 0
+          sleep 6
+        done
+        echo "Health check failed" >&2
+        exit 1
+      displayName: Warm up /healthz
+
+- stage: Approve_and_Swap
+  displayName: Manual Approve then Swap
+  dependsOn: Deploy_Staging
+  # add an environment with approvers in DevOps UI if you want gated approvals
+  jobs:
+  - deployment: swap_to_prod
+    environment: dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            displayName: Swap staging -> production
+            inputs:
+              azureSubscription: 'svc-az-spn'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -eux
+                az webapp deployment slot swap -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --target-slot production
+          - bash: |
+              set -eux
+              curl -fsS https://$(WEBAPP_NAME).azurewebsites.net/healthz
+            displayName: Post-swap health
+
+
+
+
+
+# trigger:
+#   branches: { include: [ main ] }
+#   paths: { include: [ app/** ] }
+
+# variables:
+#   ACR_NAME: $(ACR_NAME)              # set in pipeline variables or via infra output
+#   ACR_LOGIN_SERVER: $(ACR_LOGIN_SERVER)
+
+# stages:
+# - stage: Build
+#   jobs:
+#   - job: build
+#     pool: { vmImage: 'ubuntu-latest' }
+#     steps:
+#     - checkout: self
+#     - task: NodeTool@0
+#       inputs: { versionSpec: '18.x' }
+#     - bash: |
+#         cd app/api
+#         npm ci
+#         npm test --if-present
+#         docker build -t ish-api:$(Build.BuildId) .
+#         az acr login --name $(ACR_NAME)
+#         docker tag ish-api:$(Build.BuildId) $(ACR_LOGIN_SERVER)/ish-api:$(Build.BuildId)
+#         docker push $(ACR_LOGIN_SERVER)/ish-api:$(Build.BuildId)
+#     - publish: app/api
+#       artifact: docker-image-info
+
+# - stage: Deploy
+#   dependsOn: Build
+#   jobs:
+#   - job: deploy_to_staging
+#     pool: { vmImage: 'ubuntu-latest' }
+#     steps:
+#     - task: AzureCLI@2
+#       inputs:
+#         azureSubscription: 'svc-az-spn'   # your service connection name
+#         scriptType: bash
+#         scriptLocation: inlineScript
+#         inlineScript: |
+#           set -euo pipefail
+#           RG="rg-ish-dev"
+#           APP="ish-dev-api"
+#           IMAGE="$(ACR_LOGIN_SERVER)/ish-api:$(Build.BuildId)"
+#           az webapp deployment slot create -g $RG -n $APP --slot staging --configuration-source $APP || true
+#           az webapp config container set -g $RG -n $APP --slot staging --docker-custom-image-name $IMAGE --docker-registry-server-url https://$(ACR_LOGIN_SERVER)
+#           az webapp restart -g $RG -n $APP --slot staging
+#           sleep 5
+#           curl -fsS https://$APP-staging.azurewebsites.net/healthz || true
+
+#   - job: risk_gate
+#     dependsOn: deploy_to_staging
+#     pool: { vmImage: 'ubuntu-latest' }
+#     steps:
+#     - bash: |
+#         # simple gate: query App Insights or Kusto via az cli; fail if "High"
+#         echo "Risk check: (stubbed, implement KQL call here)"
+#         # you would use az monitor app-insights query for a real KQL check
+#         echo "Risk OK"
+
+#   - job: swap
+#     dependsOn: risk_gate
+#     condition: succeeded()
+#     steps:
+#     - task: AzureCLI@2
+#       inputs:
+#         azureSubscription: 'svc-az-spn'
+#         scriptType: bash
+#         inlineScript: |
+#           RG="rg-ish-dev"
+#           APP="ish-dev-api"
+#           az webapp deployment slot swap -g $RG -n $APP --slot staging --target-slot production

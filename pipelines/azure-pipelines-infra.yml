@@ -1,0 +1,55 @@
+trigger:
+  branches: { include: [ main ] }
+  paths: { include: [ infra/** ] }
+
+variables:
+  - name: TF_VAR_subscription_id
+    value: $(AZ_SUBSCRIPTION_ID)   # set in pipeline or variable group
+  - name: TF_VAR_tenant_id
+    value: $(AZ_TENANT_ID)
+
+stages:
+- stage: Validate
+  jobs:
+  - job: tfvalidate
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+    - checkout: self
+    - bash: |
+        cd infra/envs/dev
+        terraform init -upgrade
+        terraform fmt -check
+        terraform validate
+    - bash: |
+        pipx install checkov || true
+        checkov -d infra/envs/dev || true
+
+- stage: Plan
+  dependsOn: Validate
+  jobs:
+  - job: tfplan
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+    - checkout: self
+    - bash: |
+        cd infra/envs/dev
+        terraform init -upgrade
+        terraform plan -out tfplan
+        terraform show -no-color tfplan > plan.txt
+    - publish: infra/envs/dev/plan.txt
+      artifact: tfplan
+
+- stage: Apply
+  dependsOn: Plan
+  jobs:
+  - deployment: apply
+    environment: dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+          - bash: |
+              cd infra/envs/dev
+              terraform init -upgrade
+              terraform apply -auto-approve

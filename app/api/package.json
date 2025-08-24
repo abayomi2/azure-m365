@@ -1,0 +1,7 @@
+{
+  "name": "ish-api",
+  "version": "0.1.0",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "test": "echo 'no tests' && exit 0" },
+  "dependencies": { "express": "^4.18.2", "uuid": "^9.0.0" }
+}

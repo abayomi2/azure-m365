@@ -1,0 +1,59 @@
+# -------------------------
+# Terraform
+# -------------------------
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform/
+.terraform.lock.hcl
+
+# -------------------------
+# Node.js
+# -------------------------
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
+.pnpm-debug.log
+
+# Logs
+logs
+*.log
+*.out
+*.err
+
+# Coverage & testing
+coverage/
+.nyc_output/
+
+# -------------------------
+# Docker
+# -------------------------
+*.tar
+.dockerignore
+
+# -------------------------
+# OS / IDE junk
+# -------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# -------------------------
+# Azure DevOps / CI
+# -------------------------
+.azuredevops/
+*.taskkey
+spn-credentials.json
