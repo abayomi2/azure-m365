@@ -56,7 +56,7 @@ module "appservice" {
   container_repository  = "ish-api"
   container_tag         = "latest"
   container_port        = 8080
-  plan_sku              = "B1" # cheaper for dev; bump to P1v3 for prod-like perf
+  plan_sku              = "S1" # cheaper for dev; bump to P1v3 for prod-like perf
 }
 
 output "api_hostname" {
