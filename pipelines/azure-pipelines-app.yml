@@ -73,6 +73,22 @@ stages:
         inlineScript: |
           set -eux
           az webapp deployment slot create -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --configuration-source $(WEBAPP_NAME) || true
+
+    - task: AzureCLI@2
+      displayName: Ensure staging slot has Managed Identity + AcrPull
+      inputs:
+        azureSubscription: 'svc-az-spn'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -eux
+          az webapp identity assign -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging
+          SLOT_MI=$(az webapp identity show -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --query principalId -o tsv)
+          echo "Staging slot principalId: $SLOT_MI"
+          ACR_ID=$(az acr show -n $(ACR_NAME) --query id -o tsv)
+          az role assignment create --assignee "$SLOT_MI" --role "AcrPull" --scope "$ACR_ID" || true
+          sleep 15
+
     - task: AzureCLI@2
       displayName: Point slot to new image
       inputs:
@@ -87,6 +103,7 @@ stages:
             --docker-custom-image-name $(ACR_LOGIN_SERVER)/ish-api:$(IMAGE_TAG) \
             --docker-registry-server-url https://$(ACR_LOGIN_SERVER)
           az webapp restart -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging
+
     - bash: |
         set -eux
         for i in {1..10}; do
