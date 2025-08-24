@@ -4,14 +4,19 @@ trigger:
 
 name: ish-ci-$(Date:yyyyMMdd)$(Rev:.r)
 
+# Variable group must define: ACR_NAME, ACR_LOGIN_SERVER, RESOURCE_GROUP, WEBAPP_NAME
 variables:
-- group: ish-dev   # must contain: ACR_NAME, ACR_LOGIN_SERVER, RESOURCE_GROUP, WEBAPP_NAME
+- group: ish-dev
 
 stages:
+# --------------------------
+# Preflight: validate vars
+# --------------------------
 - stage: Preflight
   displayName: Preflight Vars
   jobs:
   - job: check
+    displayName: Validate required variables
     pool: { vmImage: 'ubuntu-latest' }
     steps:
     - bash: |
@@ -26,22 +31,31 @@ stages:
         : "${WEBAPP_NAME?WEBAPP_NAME is empty}"
       displayName: Preflight vars
 
+# --------------------------
+# Build + Push to ACR
+# --------------------------
 - stage: Build_Push
   displayName: Build & Push to ACR
   dependsOn: Preflight
   jobs:
   - job: build
+    displayName: Docker Build & Push
     pool: { vmImage: 'ubuntu-latest' }
     steps:
     - checkout: self
+
     - task: NodeTool@0
       inputs: { versionSpec: '18.x' }
+      displayName: Use Node 18.x
+
     - bash: |
         set -eux
         cd app/api
+        # Install production deps and build image
         npm install --omit=dev
         docker build -t $(ACR_LOGIN_SERVER)/ish-api:$(Build.BuildId) .
-      displayName: Build image
+      displayName: Build container image
+
     - task: AzureCLI@2
       displayName: ACR Login & Push
       inputs:
@@ -55,6 +69,9 @@ stages:
           echo "##vso[task.setvariable variable=IMAGE_TAG;isOutput=true]$(Build.BuildId)"
       name: pushstep
 
+# --------------------------
+# Deploy to Staging Slot
+# --------------------------
 - stage: Deploy_Staging
   displayName: Deploy to Staging Slot
   dependsOn: Build_Push
@@ -62,6 +79,7 @@ stages:
     IMAGE_TAG: $[ stageDependencies.Build_Push.build.outputs['pushstep.IMAGE_TAG'] ]
   jobs:
   - job: deploy_staging
+    displayName: Deploy to staging
     pool: { vmImage: 'ubuntu-latest' }
     steps:
     - task: AzureCLI@2
@@ -76,7 +94,7 @@ stages:
             -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) \
             --slot staging --configuration-source $(WEBAPP_NAME) || true
 
-    # 🔒 Hardened identity + AcrPull step
+    # Hardened: assign MI to slot + grant AcrPull using --assignee-object-id
     - task: AzureCLI@2
       displayName: Ensure staging slot has Managed Identity + AcrPull
       inputs:
@@ -108,8 +126,8 @@ stages:
           ACR_ID="$(az acr show -n "$(ACR_NAME)" --query id -o tsv)"
           echo "ACR_ID: ${ACR_ID}"
 
-          echo "[4/4] Grant AcrPull (ignore if you lack permission, but print a clear note)..."
-          if az role assignment create --assignee "${SLOT_MI}" --role "AcrPull" --scope "${ACR_ID}" >/dev/null 2>&1; then
+          echo "[4/4] Grant AcrPull (ignore if RBAC lacks permission, but print a note)..."
+          if az role assignment create --assignee-object-id "${SLOT_MI}" --role "AcrPull" --scope "${ACR_ID}" >/dev/null 2>&1; then
             echo "AcrPull granted to slot MI."
           else
             echo "WARNING: Could not grant AcrPull (likely insufficient RBAC for this service connection)."
@@ -117,14 +135,13 @@ stages:
             echo "  az webapp identity assign -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging"
             echo "  SLOT_MI=\$(az webapp identity show -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --query principalId -o tsv)"
             echo "  ACR_ID=\$(az acr show -n $(ACR_NAME) --query id -o tsv)"
-            echo "  az role assignment create --assignee \$SLOT_MI --role AcrPull --scope \$ACR_ID"
+            echo "  az role assignment create --assignee-object-id \$SLOT_MI --role AcrPull --scope \$ACR_ID"
           fi
 
           echo "Sleeping 15s to allow RBAC propagation..."
           sleep 15
 
-          echo "Diagnostics:"
-          echo "- Current role assignments for slot MI on ACR scope:"
+          echo "Diagnostics (current role assignments for slot MI on ACR scope):"
           az role assignment list --assignee-object-id "${SLOT_MI}" --scope "${ACR_ID}" --query "[].{role:roleDefinitionName,scope:scope}" -o table || true
 
     - task: AzureCLI@2
@@ -144,6 +161,7 @@ stages:
 
     - bash: |
         set -eux
+        # Warm up /healthz with retries
         for i in {1..10}; do
           curl -fsS https://$(WEBAPP_NAME)-staging.azurewebsites.net/healthz && exit 0
           sleep 6
@@ -152,12 +170,16 @@ stages:
         exit 1
       displayName: Warm up /healthz
 
+# --------------------------
+# Manual approve (optional) + Swap to prod
+# --------------------------
 - stage: Approve_and_Swap
   displayName: Manual Approve then Swap
   dependsOn: Deploy_Staging
   jobs:
   - deployment: swap_to_prod
-    environment: dev    # optional: configure an Environment 'dev' with approvers
+    displayName: Swap staging → production
+    environment: dev   # optional: configure an Environment 'dev' with approvers in DevOps UI
     strategy:
       runOnce:
         deploy:
@@ -170,7 +192,10 @@ stages:
               scriptLocation: inlineScript
               inlineScript: |
                 set -eux
-                az webapp deployment slot swap -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --target-slot production
+                az webapp deployment slot swap \
+                  -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) \
+                  --slot staging --target-slot production
+
           - bash: |
               set -eux
               curl -fsS https://$(WEBAPP_NAME).azurewebsites.net/healthz

@@ -1,7 +1,17 @@
 {
-  "name": "ish-api",
-  "version": "0.1.0",
+  "name": "ish-project-dashboard",
+  "version": "1.0.0",
+  "description": "Increment Service Hub - DevOps Project Dashboard",
   "main": "server.js",
-  "scripts": { "start": "node server.js", "test": "echo 'no tests' && exit 0" },
-  "dependencies": { "express": "^4.18.2", "uuid": "^9.0.0" }
+  "scripts": {
+    "start": "node server.js",
+    "healthz": "curl -fsS http://localhost:8080/healthz || exit 1"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
 }
+

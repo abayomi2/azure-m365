@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Increment Service Hub — DevOps Project Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="./styles.css" rel="stylesheet" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero__content">
+      <h1>Increment Service Hub</h1>
+      <p class="subtitle">End-to-end DevOps on Microsoft Azure</p>
+      <div class="pill">Live</div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>🏗️ Architecture</h2>
+      <div class="grid two">
+        <div class="stack">
+          <h3>Cloud</h3>
+          <ul>
+            <li>Azure Resource Group <span class="tag">ish-dev-rg</span></li>
+            <li>Azure Container Registry <span class="tag">ishdevacr01</span></li>
+            <li>Azure App Service (Linux) <span class="tag">ish-dev-api</span></li>
+            <li>Deployment Slot <span class="tag">staging</span> → Swap to <span class="tag">production</span></li>
+          </ul>
+        </div>
+        <div class="stack">
+          <h3>Identity & Security</h3>
+          <ul>
+            <li>Managed Identity on App + Slot</li>
+            <li>ACR access via <span class="tag">AcrPull</span> (no passwords)</li>
+            <li>RBAC everywhere</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>🧰 Tooling</h2>
+      <div class="chips">
+        <span class="chip">Terraform</span>
+        <span class="chip">Azure DevOps Pipelines</span>
+        <span class="chip">Azure CLI</span>
+        <span class="chip">Docker</span>
+        <span class="chip">Node.js</span>
+        <span class="chip">App Service Slots</span>
+        <span class="chip">Azure Container Registry</span>
+        <span class="chip">Managed Identity</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>🚀 CI/CD Stages</h2>
+      <ol class="timeline">
+        <li>
+          <div class="dot"></div>
+          <div class="content">
+            <h3>Build</h3>
+            <p>Node app → Docker image</p>
+            <code>docker build -t &lt;acr&gt;/ish-api:&lt;buildId&gt; .</code>
+          </div>
+        </li>
+        <li>
+          <div class="dot"></div>
+          <div class="content">
+            <h3>Push</h3>
+            <p>Push to Azure Container Registry</p>
+            <code>docker push &lt;acr&gt;/ish-api:&lt;buildId&gt;</code>
+          </div>
+        </li>
+        <li>
+          <div class="dot"></div>
+          <div class="content">
+            <h3>Deploy (Staging Slot)</h3>
+            <p>Assign MI, grant <span class="tag">AcrPull</span>, configure container</p>
+            <code>az webapp config container set --slot staging ...</code>
+          </div>
+        </li>
+        <li>
+          <div class="dot"></div>
+          <div class="content">
+            <h3>Health Check</h3>
+            <p>Warm up <code>/healthz</code> then approve</p>
+          </div>
+        </li>
+        <li>
+          <div class="dot"></div>
+          <div class="content">
+            <h3>Swap to Production</h3>
+            <p>Zero-downtime slot swap</p>
+            <code>az webapp deployment slot swap ...</code>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>✅ Best Practices</h2>
+      <ul class="bullets">
+        <li>Infrastructure as Code (Terraform backend in Azure Storage)</li>
+        <li>Managed Identity for ACR pulls (no registry creds)</li>
+        <li>Staging slot + warm-up for safe deploys</li>
+        <li>RBAC least-privilege (AcrPull, Contributor scope)</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <span>© Increment • DevOps Demo</span>
+      <span id="meta"></span>
+    </div>
+  </footer>
+
+  <script>
+    (async () => {
+      try {
+        const res = await fetch('/meta');
+        const meta = await res.json();
+        document.getElementById('meta').textContent =
+          `${meta.app} • ${meta.version} • ${meta.env} • ${new Date(meta.timestamp).toLocaleString()}`;
+      } catch(e) {
+        document.getElementById('meta').textContent = 'Live';
+      }
+    })();
+  </script>
+</body>
+</html>

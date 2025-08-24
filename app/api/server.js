@@ -1,26 +1,28 @@
 const express = require('express');
-const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 8080;
 
-const tickets = new Map();
+// Static files
+app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/healthz', (req, res) => res.status(200).send('ok'));
+// Health check
+app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
-app.post('/api/tickets', (req, res) => {
-  const id = uuidv4();
-  const { title, severity, tenant } = req.body;
-  const ticket = { id, title, severity: severity || 'P3', tenant: tenant || 'internal', status: 'New', createdAt: new Date().toISOString() };
-  tickets.set(id, ticket);
-  res.status(201).json(ticket);
+// Simple API for metadata (optional; used by the page footer)
+app.get('/meta', (_req, res) => {
+  res.json({
+    env: process.env.NODE_ENV || 'dev',
+    app: 'ISH DevOps Project Dashboard',
+    version: '1.0.0',
+    timestamp: new Date().toISOString()
+  });
 });
 
-app.get('/api/tickets/:id', (req, res) => {
-  const t = tickets.get(req.params.id);
-  if (!t) return res.status(404).send({ error: 'Not found' });
-  res.json(t);
+// Serve SPA
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/api/tickets', (req, res) => res.json([...tickets.values()]));
-
-app.listen(8080, () => console.log('ISH API listening on 8080'));
+app.listen(PORT, () => console.log(`Dashboard running on :${PORT}`));
