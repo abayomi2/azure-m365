@@ -5,7 +5,7 @@ trigger:
 name: ish-ci-$(Date:yyyyMMdd)$(Rev:.r)
 
 variables:
-- group: ish-dev
+- group: ish-dev   # must contain: ACR_NAME, ACR_LOGIN_SERVER, RESOURCE_GROUP, WEBAPP_NAME
 
 stages:
 - stage: Preflight
@@ -72,8 +72,11 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           set -eux
-          az webapp deployment slot create -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --configuration-source $(WEBAPP_NAME) || true
+          az webapp deployment slot create \
+            -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) \
+            --slot staging --configuration-source $(WEBAPP_NAME) || true
 
+    # 🔒 Hardened identity + AcrPull step
     - task: AzureCLI@2
       displayName: Ensure staging slot has Managed Identity + AcrPull
       inputs:
@@ -81,13 +84,48 @@ stages:
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
-          set -eux
-          az webapp identity assign -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging
-          SLOT_MI=$(az webapp identity show -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --query principalId -o tsv)
-          echo "Staging slot principalId: $SLOT_MI"
-          ACR_ID=$(az acr show -n $(ACR_NAME) --query id -o tsv)
-          az role assignment create --assignee "$SLOT_MI" --role "AcrPull" --scope "$ACR_ID" || true
+          set -euo pipefail
+          echo "== Env ======="
+          echo "SUBSCRIPTION: $(az account show --query id -o tsv || true)"
+          echo "RG: $(RESOURCE_GROUP)"
+          echo "APP: $(WEBAPP_NAME)"
+          echo "ACR: $(ACR_NAME)"
+          echo "=============="
+
+          echo "[1/4] Assign (or confirm) system-assigned identity on the STAGING slot..."
+          az webapp identity assign -g "$(RESOURCE_GROUP)" -n "$(WEBAPP_NAME)" --slot staging >/dev/null || true
+
+          echo "[2/4] Read slot principalId..."
+          SLOT_MI="$(az webapp identity show -g "$(RESOURCE_GROUP)" -n "$(WEBAPP_NAME)" --slot staging --query principalId -o tsv)"
+          if [ -z "${SLOT_MI:-}" ]; then
+            echo "ERROR: Could not retrieve staging slot principalId. Does the slot exist?" >&2
+            az webapp deployment slot list -g "$(RESOURCE_GROUP)" -n "$(WEBAPP_NAME)" -o table || true
+            exit 1
+          fi
+          echo "Staging slot principalId: ${SLOT_MI}"
+
+          echo "[3/4] Get ACR resource ID..."
+          ACR_ID="$(az acr show -n "$(ACR_NAME)" --query id -o tsv)"
+          echo "ACR_ID: ${ACR_ID}"
+
+          echo "[4/4] Grant AcrPull (ignore if you lack permission, but print a clear note)..."
+          if az role assignment create --assignee "${SLOT_MI}" --role "AcrPull" --scope "${ACR_ID}" >/dev/null 2>&1; then
+            echo "AcrPull granted to slot MI."
+          else
+            echo "WARNING: Could not grant AcrPull (likely insufficient RBAC for this service connection)."
+            echo "If the next step fails to pull the image, run these once with an Owner/User Access Admin account:"
+            echo "  az webapp identity assign -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging"
+            echo "  SLOT_MI=\$(az webapp identity show -g $(RESOURCE_GROUP) -n $(WEBAPP_NAME) --slot staging --query principalId -o tsv)"
+            echo "  ACR_ID=\$(az acr show -n $(ACR_NAME) --query id -o tsv)"
+            echo "  az role assignment create --assignee \$SLOT_MI --role AcrPull --scope \$ACR_ID"
+          fi
+
+          echo "Sleeping 15s to allow RBAC propagation..."
           sleep 15
+
+          echo "Diagnostics:"
+          echo "- Current role assignments for slot MI on ACR scope:"
+          az role assignment list --assignee-object-id "${SLOT_MI}" --scope "${ACR_ID}" --query "[].{role:roleDefinitionName,scope:scope}" -o table || true
 
     - task: AzureCLI@2
       displayName: Point slot to new image
@@ -119,7 +157,7 @@ stages:
   dependsOn: Deploy_Staging
   jobs:
   - deployment: swap_to_prod
-    environment: dev
+    environment: dev    # optional: configure an Environment 'dev' with approvers
     strategy:
       runOnce:
         deploy:
