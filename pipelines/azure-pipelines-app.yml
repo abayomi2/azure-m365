@@ -5,12 +5,28 @@ trigger:
 name: ish-ci-$(Date:yyyyMMdd)$(Rev:.r)
 
 variables:
-  ACR_NAME: $(ACR_NAME)
-  ACR_LOGIN_SERVER: $(ACR_LOGIN_SERVER)
-  RESOURCE_GROUP: $(RESOURCE_GROUP)
-  WEBAPP_NAME: $(WEBAPP_NAME)
+  - group: ish-dev
+
+
+# variables:
+#   ACR_NAME: $(ACR_NAME)
+#   ACR_LOGIN_SERVER: $(ACR_LOGIN_SERVER)
+#   RESOURCE_GROUP: $(RESOURCE_GROUP)
+#   WEBAPP_NAME: $(WEBAPP_NAME)
 
 stages:
+- bash: |
+    set -euo pipefail
+    echo "ACR_NAME=$(ACR_NAME)"
+    echo "ACR_LOGIN_SERVER=$(ACR_LOGIN_SERVER)"
+    echo "RESOURCE_GROUP=$(RESOURCE_GROUP)"
+    echo "WEBAPP_NAME=$(WEBAPP_NAME)"
+    : "${ACR_NAME?ACR_NAME is empty}"
+    : "${ACR_LOGIN_SERVER?ACR_LOGIN_SERVER is empty}"
+    : "${RESOURCE_GROUP?RESOURCE_GROUP is empty}"
+    : "${WEBAPP_NAME?WEBAPP_NAME is empty}"
+  displayName: Preflight vars
+
 - stage: Build_Push
   displayName: Build & Push to ACR
   jobs:
