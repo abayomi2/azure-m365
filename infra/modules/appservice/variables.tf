@@ -1,43 +1,58 @@
-variable "rg_name"   { type = string }
-variable "location"  { type = string }
-variable "app_name"  { type = string }
+variable "rg_name" {
+  description = "Resource group name"
+  type        = string
+}
 
-# ACR info so we can form the container image reference and grant AcrPull
-variable "acr_login" { type = string } # e.g. myacr.azurecr.io
-variable "acr_id"    { type = string }
+variable "location" {
+  description = "Azure location (e.g. australiaeast)"
+  type        = string
+}
 
-# Optional image settings (defaults ok for first deploy)
-variable "container_repository" {
-  type    = string
-  default = "ish-api"
+variable "app_name" {
+  description = "Web App name"
+  type        = string
 }
-variable "container_tag" {
-  type    = string
-  default = "latest"
-}
-variable "container_port" {
-  type    = number
-  default = 8080
-}
+
 variable "plan_sku" {
-  type    = string
-  default = "P1v3" # production-ish; use B1 for cheap lab
+  description = "App Service Plan SKU (e.g. S1, P1v3)"
+  type        = string
+  default     = "S1"
 }
 
+# --- Container image & registry ---
 
+variable "acr_login" {
+  description = "ACR login server hostname (e.g. ishdevacr01.azurecr.io)"
+  type        = string
+}
 
-# variable "rg_name" {
-#   type = string
-# }
+variable "container_repository" {
+  description = "Repository name in ACR (e.g. ish-api)"
+  type        = string
+}
 
-# variable "location" {
-#   type = string
-# }
+variable "container_tag" {
+  description = "Image tag to set at provision time (pipeline may override via slot/container config)"
+  type        = string
+  default     = "latest"
+}
 
-# variable "acr_login" {
-#   type = string
-# }
+variable "container_port" {
+  description = "Container listening port"
+  type        = number
+  default     = 8080
+}
 
-# variable "acr_id" {
-#   type = string
-# }
+# --- Integrations ---
+
+variable "ai_connection_string" {
+  description = "Application Insights connection string (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "acr_id" {
+  description = "ACR resource ID (for AcrPull role assignment)"
+  type        = string
+}
+

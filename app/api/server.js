@@ -4,6 +4,25 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// --- Application Insights (only if connection string is set) ---
+try {
+  if (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING) {
+    const appInsights = require('applicationinsights');
+    appInsights
+      .setup() // reads APPLICATIONINSIGHTS_CONNECTION_STRING env var
+      .setAutoCollectRequests(true)
+      .setAutoCollectDependencies(true)
+      .setSendLiveMetrics(false)
+      .setAutoCollectExceptions(true)
+      .start();
+    console.log("Application Insights initialized");
+  } else {
+    console.log("AI connection string not set; skipping AI init");
+  }
+} catch (e) {
+  console.log("AI init error:", e.message);
+}
+
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));
 
