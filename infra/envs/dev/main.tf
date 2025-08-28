@@ -78,6 +78,16 @@ module "observability" {
   # enable_kql_alert = true
 }
 
+module "m365_automation" {
+  source                   = "../../modules/m365_automation"
+  rg_name                  = azurerm_resource_group.core.name
+  location                 = local.location
+  automation_account_name  = "ish-dev-aa"
+  default_domain           = "oguntiloye101gmail.onmicrosoft.com"
+  default_license_sku_id   = "" # set to your real SubscribedSku GUID when ready
+}
+
+
 
 data "azurerm_resource_group" "core" { name = azurerm_resource_group.core.name }
 
